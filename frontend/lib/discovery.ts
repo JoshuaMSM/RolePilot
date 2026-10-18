@@ -120,6 +120,16 @@ async function discoverWorkdayJobs(page: URL): Promise<{ source: string; jobs: N
   return { source: "workday", jobs };
 }
 
+function smartRecruitersPostingUrl(job: { id: string; name: string; postingUrl?: string; ref?: string }, companySlug: string) {
+  if (job.postingUrl?.startsWith("https://jobs.smartrecruiters.com/")) return job.postingUrl;
+  try {
+    const reference = new URL(job.ref ?? "");
+    if (reference.protocol === "https:" && reference.hostname === "jobs.smartrecruiters.com") return reference.toString();
+  } catch { /* Ignore API and malformed refs; construct the public job page below. */ }
+  const titleSlug = job.name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `https://jobs.smartrecruiters.com/${encodeURIComponent(companySlug)}/${encodeURIComponent(job.id)}-${titleSlug}`;
+}
+
 export async function discoverCompanyJobs(careersUrl: string): Promise<{ source: string; jobs: NormalizedPosting[] }> {
   const page = new URL(careersUrl);
   const host = page.hostname.toLowerCase();
@@ -147,8 +157,8 @@ export async function discoverCompanyJobs(careersUrl: string): Promise<{ source:
   if (host === "careers.smartrecruiters.com" || host === "jobs.smartrecruiters.com") {
     const slug = pathParts[0];
     if (!slug) throw new Error("SmartRecruiters careers URL needs a company slug.");
-    const data = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(slug)}/postings?limit=100`) as { content?: { id: string; name: string; ref?: string; location?: { city?: string; region?: string; country?: string }; releasedDate?: string; jobAd?: { sections?: { jobDescription?: { text?: string } } } }[] };
-    return { source: "smartrecruiters", jobs: (data.content ?? []).map((job) => ({ id: job.id, title: job.name, url: job.ref ?? `https://jobs.smartrecruiters.com/${slug}/${job.id}`, location: [job.location?.city, job.location?.region, job.location?.country].filter(Boolean).join(", ") || null, description: stripHtml(job.jobAd?.sections?.jobDescription?.text), postedAt: job.releasedDate ?? null })) };
+    const data = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(slug)}/postings?limit=100`) as { content?: { id: string; name: string; ref?: string; postingUrl?: string; location?: { city?: string; region?: string; country?: string }; releasedDate?: string; jobAd?: { sections?: { jobDescription?: { text?: string } } } }[] };
+    return { source: "smartrecruiters", jobs: (data.content ?? []).map((job) => ({ id: job.id, title: job.name, url: smartRecruitersPostingUrl(job, slug), location: [job.location?.city, job.location?.region, job.location?.country].filter(Boolean).join(", ") || null, description: stripHtml(job.jobAd?.sections?.jobDescription?.text), postedAt: job.releasedDate ?? null })) };
   }
   const { body, target } = await safeFetch(careersUrl);
   if (target.hostname !== page.hostname) return discoverCompanyJobs(target.toString());
